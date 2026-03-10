@@ -1,45 +1,156 @@
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { StyleSheet, Text, TouchableOpacity, View, Alert } from "react-native";
 import { db } from "../firebaseConfig.js";
 import { Picker } from "@react-native-picker/picker";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function HomeScreen({ navigation }) {
+
   const [cuisine, setCuisine] = useState("Italian");
+  const [difficulty, setDifficulty] = useState("Easy");
+
+  useEffect(() => {
+    loadSavedPreferences();
+  }, []);
+
+  useEffect(() => {
+    savePreferences();
+  }, [cuisine, difficulty]);
+
+  const loadSavedPreferences = async () => {
+    try {
+      const savedCuisine = await AsyncStorage.getItem("selectedCuisine");
+      const savedDifficulty = await AsyncStorage.getItem("selectedDifficulty");
+
+      if (savedCuisine) setCuisine(savedCuisine);
+      if (savedDifficulty) setDifficulty(savedDifficulty);
+    } catch (error) {
+      console.log("Error loading preferences:", error);
+    }
+  };
+
+  const savePreferences = async () => {
+    try {
+      await AsyncStorage.setItem("selectedCuisine", cuisine);
+      await AsyncStorage.setItem("selectedDifficulty", difficulty);
+    } catch (error) {
+      console.log("Error saving preferences:", error);
+    }
+  };
+
+  const saveLastRecipeLocally = async (recipeData) => {
+    try {
+      await AsyncStorage.setItem("lastRecipe", JSON.stringify(recipeData));
+    } catch (error) {
+      console.log("Error saving recipe locally:", error);
+    }
+  };
 
   const getRecipe = async () => {
+
     try {
+
+      let minTime = 0;
+      let maxTime = 20;
+
+      if (difficulty === "Medium") {
+        minTime = 21;
+        maxTime = 40;
+      }
+
+      if (difficulty === "Hard") {
+        minTime = 41;
+        maxTime = 120;
+      }
+
+      const cacheKey = `cachedRecipes_${cuisine}_${difficulty}`;
+      const cached = await AsyncStorage.getItem(cacheKey);
+
+      if (cached) {
+
+        const recipes = JSON.parse(cached);
+
+        if (recipes.length > 0) {
+
+          const recipe =
+            recipes[Math.floor(Math.random() * recipes.length)];
+
+          await setDoc(doc(db, "recipes", recipe.id.toString()), {
+            id: recipe.id,
+            title: recipe.title,
+            image: recipe.image,
+            cuisine: cuisine,
+            difficulty: difficulty,
+            readyInMinutes: recipe.readyInMinutes,
+            servings: recipe.servings,
+            summary: recipe.summary,
+            instructions: recipe.instructions || "",
+            ingredients:
+              recipe.extendedIngredients?.map((item) => ({
+                id: item.id,
+                name: item.name,
+                original: item.original,
+                amount: item.amount,
+                unit: item.unit,
+              })) || [],
+            createdAt: serverTimestamp(),
+          });
+
+          await saveLastRecipeLocally(recipe);
+
+          navigation.navigate("DishIntro", { recipe });
+
+          return;
+        }
+      }
+
       const searchResponse = await fetch(
-        `https://api.spoonacular.com/recipes/complexSearch?cuisine=${cuisine}&number=1&apiKey=6d32bba489f444f292a99e602a3f0b79`
+        `https://api.spoonacular.com/recipes/complexSearch?cuisine=${cuisine}&number=20&addRecipeInformation=true&apiKey=e9969f8d922447e49055c217f58185b2`
       );
 
       const searchData = await searchResponse.json();
+
+      console.log(searchData);
+
+      if (searchData.status === "failure") {
+        Alert.alert("API Error", searchData.message || "Something went wrong.");
+        return;
+      }
 
       if (!searchData.results || searchData.results.length === 0) {
         Alert.alert("No recipe found");
         return;
       }
 
-      const recipeId = searchData.results[0].id;
-
-      const infoResponse = await fetch(
-        `https://api.spoonacular.com/recipes/${recipeId}/information?apiKey=6d32bba489f444f292a99e602a3f0b79`
+      const filteredRecipes = searchData.results.filter(
+        (recipe) =>
+          recipe.readyInMinutes >= minTime &&
+          recipe.readyInMinutes <= maxTime
       );
 
-      const recipe = await infoResponse.json();
+      if (filteredRecipes.length === 0) {
+        Alert.alert("No recipes match this difficulty");
+        return;
+      }
 
-      // Save recipe into Firestore
-      await setDoc(doc(db, "recipes", recipeId.toString()), {
-        id: recipe.id,
-        title: recipe.title,
-        image: recipe.image,
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(filteredRecipes));
+
+      const recipeData =
+        filteredRecipes[Math.floor(Math.random() * filteredRecipes.length)];
+
+      await setDoc(doc(db, "recipes", recipeData.id.toString()), {
+        id: recipeData.id,
+        title: recipeData.title,
+        image: recipeData.image,
         cuisine: cuisine,
-        readyInMinutes: recipe.readyInMinutes,
-        servings: recipe.servings,
-        summary: recipe.summary,
-        instructions: recipe.instructions || "",
+        difficulty: difficulty,
+        readyInMinutes: recipeData.readyInMinutes,
+        servings: recipeData.servings,
+        summary: recipeData.summary,
+        instructions: recipeData.instructions || "",
         ingredients:
-          recipe.extendedIngredients?.map((item) => ({
+          recipeData.extendedIngredients?.map((item) => ({
             id: item.id,
             name: item.name,
             original: item.original,
@@ -49,15 +160,23 @@ export default function HomeScreen({ navigation }) {
         createdAt: serverTimestamp(),
       });
 
-      navigation.navigate("DishIntro", { recipe });
+      await saveLastRecipeLocally(recipeData);
+
+      navigation.navigate("DishIntro", { recipe: recipeData });
+
     } catch (error) {
+
       console.log(error);
       Alert.alert("Error", "Could not fetch or save recipe.");
+
     }
+
   };
 
   return (
+
     <View style={styles.container}>
+
       <Text style={styles.title}>Foodies</Text>
 
       <Text style={styles.label}>Select Cuisine</Text>
@@ -74,14 +193,29 @@ export default function HomeScreen({ navigation }) {
         <Picker.Item label="Korean" value="Korean" />
       </Picker>
 
+      <Text style={styles.label}>Select Difficulty</Text>
+
+      <Picker
+        selectedValue={difficulty}
+        onValueChange={(itemValue) => setDifficulty(itemValue)}
+        style={{ width: 200 }}
+      >
+        <Picker.Item label="Easy" value="Easy" />
+        <Picker.Item label="Medium" value="Medium" />
+        <Picker.Item label="Hard" value="Hard" />
+      </Picker>
+
       <TouchableOpacity style={styles.button} onPress={getRecipe}>
         <Text style={styles.buttonText}>Make Food</Text>
       </TouchableOpacity>
+
     </View>
+
   );
 }
 
 const styles = StyleSheet.create({
+
   container: {
     flex: 1,
     justifyContent: "center",
@@ -109,4 +243,5 @@ const styles = StyleSheet.create({
     color: "white",
     fontWeight: "bold",
   },
+
 });
