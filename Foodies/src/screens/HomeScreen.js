@@ -6,6 +6,7 @@ import { Picker } from "@react-native-picker/picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function HomeScreen({ navigation }) {
+
   const [cuisine, setCuisine] = useState("Italian");
   const [difficulty, setDifficulty] = useState("Easy");
 
@@ -47,7 +48,9 @@ export default function HomeScreen({ navigation }) {
   };
 
   const getRecipe = async () => {
+
     try {
+
       let minTime = 0;
       let maxTime = 20;
 
@@ -63,10 +66,60 @@ export default function HomeScreen({ navigation }) {
 
       const searchResponse = await fetch(
         `https://api.spoonacular.com/recipes/complexSearch?cuisine=${cuisine}&number=20&addRecipeInformation=true&apiKey=167b60fc88254d41b2ac9d94d9fed015`
+      const cacheKey = `cachedRecipes_${cuisine}_${difficulty}`;
+      const cached = await AsyncStorage.getItem(cacheKey);
+
+      if (cached) {
+
+        const recipes = JSON.parse(cached);
+
+        if (recipes.length > 0) {
+
+          const recipe =
+            recipes[Math.floor(Math.random() * recipes.length)];
+
+          await setDoc(doc(db, "recipes", recipe.id.toString()), {
+            id: recipe.id,
+            title: recipe.title,
+            image: recipe.image,
+            cuisine: cuisine,
+            difficulty: difficulty,
+            readyInMinutes: recipe.readyInMinutes,
+            servings: recipe.servings,
+            summary: recipe.summary,
+            instructions: recipe.instructions || "",
+            ingredients:
+              recipe.extendedIngredients?.map((item) => ({
+                id: item.id,
+                name: item.name,
+                original: item.original,
+                amount: item.amount,
+                unit: item.unit,
+              })) || [],
+            createdAt: serverTimestamp(),
+          });
+
+          await saveLastRecipeLocally(recipe);
+
+          navigation.navigate("DishIntro", { recipe });
+
+          return;
+        }
+      }
+
+      const searchResponse = await fetch(
+        `https://api.spoonacular.com/recipes/complexSearch?cuisine=${cuisine}&number=20&addRecipeInformation=true&apiKey=e9969f8d922447e49055c217f58185b2`
       );
 
       const searchData = await searchResponse.json();
       console.log(searchData);
+
+      console.log(searchData);
+
+      if (searchData.status === "failure") {
+        Alert.alert("API Error", searchData.message || "Something went wrong.");
+        return;
+      }
 
       if (!searchData.results || searchData.results.length === 0) {
         Alert.alert("No recipe found");
@@ -95,6 +148,21 @@ export default function HomeScreen({ navigation }) {
       const recipeData = await infoResponse.json();
 
       await setDoc(doc(db, "recipes", recipeId.toString()), {
+          recipe.readyInMinutes >= minTime &&
+          recipe.readyInMinutes <= maxTime
+      );
+
+      if (filteredRecipes.length === 0) {
+        Alert.alert("No recipes match this difficulty");
+        return;
+      }
+
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(filteredRecipes));
+
+      const recipeData =
+        filteredRecipes[Math.floor(Math.random() * filteredRecipes.length)];
+
+      await setDoc(doc(db, "recipes", recipeData.id.toString()), {
         id: recipeData.id,
         title: recipeData.title,
         image: recipeData.image,
@@ -118,14 +186,20 @@ export default function HomeScreen({ navigation }) {
       await saveLastRecipeLocally(recipeData);
 
       navigation.navigate("DishIntro", { recipe: recipeData });
+
     } catch (error) {
+
       console.log(error);
       Alert.alert("Error", "Could not fetch or save recipe.");
+
     }
+
   };
 
   return (
+
     <View style={styles.container}>
+
       <Text style={styles.title}>Foodies</Text>
 
       <Text style={styles.label}>Select Cuisine</Text>
@@ -142,6 +216,7 @@ export default function HomeScreen({ navigation }) {
       </Picker>
 
       <Text style={styles.label}>Select Difficulty</Text>
+
       <Picker
         selectedValue={difficulty}
         onValueChange={(itemValue) => setDifficulty(itemValue)}
@@ -155,11 +230,14 @@ export default function HomeScreen({ navigation }) {
       <TouchableOpacity style={styles.button} onPress={getRecipe}>
         <Text style={styles.buttonText}>Make Food</Text>
       </TouchableOpacity>
+
     </View>
+
   );
 }
 
 const styles = StyleSheet.create({
+
   container: {
     flex: 1,
     justifyContent: "center",
@@ -187,4 +265,6 @@ const styles = StyleSheet.create({
     color: "white",
     fontWeight: "bold",
   },
+});
+
 });
