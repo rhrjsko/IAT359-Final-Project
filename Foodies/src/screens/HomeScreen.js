@@ -64,6 +64,8 @@ export default function HomeScreen({ navigation }) {
         maxTime = 120;
       }
 
+      const searchResponse = await fetch(
+        `https://api.spoonacular.com/recipes/complexSearch?cuisine=${cuisine}&number=20&addRecipeInformation=true&apiKey=167b60fc88254d41b2ac9d94d9fed015`
       const cacheKey = `cachedRecipes_${cuisine}_${difficulty}`;
       const cached = await AsyncStorage.getItem(cacheKey);
 
@@ -110,6 +112,7 @@ export default function HomeScreen({ navigation }) {
       );
 
       const searchData = await searchResponse.json();
+      console.log(searchData);
 
       console.log(searchData);
 
@@ -125,6 +128,26 @@ export default function HomeScreen({ navigation }) {
 
       const filteredRecipes = searchData.results.filter(
         (recipe) =>
+          recipe.readyInMinutes >= minTime && recipe.readyInMinutes <= maxTime
+      );
+
+      if (filteredRecipes.length === 0) {
+        Alert.alert("No recipes match this difficulty");
+        return;
+      }
+
+      const recipe =
+        filteredRecipes[Math.floor(Math.random() * filteredRecipes.length)];
+
+      const recipeId = recipe.id;
+
+      const infoResponse = await fetch(
+        `https://api.spoonacular.com/recipes/${recipeId}/information?apiKey=167b60fc88254d41b2ac9d94d9fed015`
+      );
+
+      const recipeData = await infoResponse.json();
+
+      await setDoc(doc(db, "recipes", recipeId.toString()), {
           recipe.readyInMinutes >= minTime &&
           recipe.readyInMinutes <= maxTime
       );
@@ -180,7 +203,6 @@ export default function HomeScreen({ navigation }) {
       <Text style={styles.title}>Foodies</Text>
 
       <Text style={styles.label}>Select Cuisine</Text>
-
       <Picker
         selectedValue={cuisine}
         onValueChange={(itemValue) => setCuisine(itemValue)}
@@ -243,5 +265,6 @@ const styles = StyleSheet.create({
     color: "white",
     fontWeight: "bold",
   },
+});
 
 });
